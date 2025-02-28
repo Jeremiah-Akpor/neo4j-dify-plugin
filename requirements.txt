@@ -1,0 +1,5 @@
+dify_plugin
+networkx
+matplotlib
+langchain_neo4j
+json-repair

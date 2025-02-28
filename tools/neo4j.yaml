@@ -1,0 +1,114 @@
+identity:
+  name: neo4j
+  author: jerry_aa
+  label:
+    en_US: neo4j
+    zh_Hans: neo4j
+    pt_BR: neo4j
+description:
+  human:
+    en_US: A tool plugin for connecting to Neo4j and excuting queries
+    zh_Hans: A tool plugin for connecting to Neo4j and excuting queries
+    pt_BR: A tool plugin for connecting to Neo4j and excuting queries
+  llm: A tool for executing Cypher queries on a Neo4j database.
+parameters:
+  - name: operation
+    type: select
+    required: true
+    label:
+      en_US: Operation Type
+    options:
+      - value: create
+        label:
+          en_US: Create Node
+      - value: read
+        label:
+          en_US: Read Data
+      - value: update
+        label:
+          en_US: Update Node
+      - value: delete
+        label:
+          en_US: Delete Node
+      - value: delete_all
+        label:
+          en_US: Delete All Node
+      - value: create_relationship
+        label:
+          en_US: Create Relationship
+      - value: createNodesWithRelationship
+        label:
+          en_US: Create Nodes with Relationship
+    human_description:
+      en_US: Select the type of operation to perform (Create, Read, Update, Delete, or Relate).
+    llm_description: Choose whether to create, read, update, delete, or relate nodes.
+    form: llm
+  - name: node_label
+    type: string
+    required: false
+    label:
+      en_US: Node Label (start node)
+    human_description:
+      en_US: The label of the node to perform operations on.
+    llm_description: The label of the node to perform operations on.
+    form: llm
+  - name: properties
+    type: string 
+    required: false
+    label:
+      en_US: Properties (JSON)
+    human_description:
+      en_US: Key-value pairs for node properties.
+    llm_description: JSON object with key-value pairs for properties.
+    default: "{}"
+    form: llm
+  - name: end_node_label
+    type: string
+    required: false
+    label:
+      en_US: End Node Label 
+    human_description:
+      en_US: The label of the end node to perform operations on.
+    llm_description: The label of the end node to perform operations on.
+    form: llm
+  - name: end_node_properties
+    type: string 
+    required: false
+    label:
+      en_US: End Node Properties (JSON)
+    human_description:
+      en_US: Key-value pairs for end node properties.
+    llm_description: JSON object with key-value pairs for end node properties.
+    default: "{}"
+    form: llm
+  - name: relationship_type
+    type: string
+    required: false
+    label:
+      en_US: Relationship Type
+    human_description:
+      en_US: The type of relationship to create.
+    llm_description: The type of relationship to create.
+    form: llm
+  - name: update_properties
+    type: string 
+    required: false
+    label:
+      en_US: Update Properties (JSON)
+    human_description:
+      en_US: Key-value pairs for  updating node properties. 
+    llm_description: JSON object with key-value pairs used to update properties.
+    default: "{}"
+    form: llm
+  - name: query
+    type: string
+    required: false
+    label:
+      en_US: Custom Query (for advanced users)
+    human_description:
+      en_US: A custom Cypher query to be executed directly.
+    llm_description: A custom Cypher query to be executed directly.
+    form: llm
+extra:
+  python:
+    source: tools/neo4j.py
