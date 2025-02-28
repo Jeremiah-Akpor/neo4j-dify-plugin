@@ -145,3 +145,5 @@ class Neo4jCRUDTool(Tool):
             raise Exception(f"Error: {str(e)}")
         finally:
             driver.close()
+git config --global user.email "jeremiahakpor_cs@outlook.com"
+  git config --global user.name "Jeremiah Akpor"
