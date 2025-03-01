@@ -25,8 +25,7 @@ class Neo4jCRUDTool(Tool):
         end_node_properties_str = tool_parameters.get("end_node_properties", "{}")
         relationship_type = tool_parameters.get("relationship_type", "")
         update_parameter_str = tool_parameters.get("update_parameter", "{}")
-        print(update_parameter_str)
-
+        print(f"Operation: {operation}, Node Label: {node_label}, Properties: {properties_str}, Query: {query}")
         # Convert properties and update_parameter from string to dictionary safely
         try:
             properties = (
@@ -47,7 +46,7 @@ class Neo4jCRUDTool(Tool):
         except json.JSONDecodeError:
             raise Exception("Error: Invalid JSON format in properties or update_parameter.")
         
-        print(update_parameter)
+        print(f"Properties: {properties}, Update Parameter: {update_parameter}")
         
         driver = GraphDatabase.driver(uri, auth=(user, password))
 
@@ -76,6 +75,40 @@ class Neo4jCRUDTool(Tool):
                         [f"n.{key} = $update_parameter.{key}" for key in update_parameter]
                     )
                     cypher_query = f"MATCH (n:{node_label}) WHERE {match_conditions} SET {update_str} RETURN n"
+                elif operation == "delete":
+                    if properties:
+                        match_conditions = " AND ".join(
+                            [f"n.{key} = $properties.{key}" for key in properties]
+                        )
+                        cypher_query = f"MATCH (n:{node_label}) WHERE {match_conditions} DETACH DELETE n RETURN 'Node and relationships deleted'"
+                    elif node_label:
+                        cypher_query = f"MATCH (n:{node_label}) DETACH DELETE n RETURN 'Nodes and relationships deleted'"
+                elif operation == "delete_all":
+                    cypher_query = "MATCH (n) DETACH DELETE n RETURN 'All nodes and relationships deleted'"
+                elif operation == "create_relationship":
+                    if not node_label or not end_node_label or not relationship_type:
+                        raise Exception("Error: start node label, end node label, and relationship_type are required.")
+                    if not properties or not end_node_properties:
+                        raise Exception("Error: Both start and end node properties are required.")
+                    
+                    cypher_query = f"""
+                        MATCH (a:{node_label} {{name: '{properties.get('name')}'}}),
+                              (b:{end_node_label} {{name: '{end_node_properties.get('name')}'}})
+                        MERGE (a)-[r:{relationship_type}]->(b)
+                        RETURN type(r) AS relationship
+                    """
+                    print("Generated Query:", cypher_query)
+                elif operation == "createNodesWithRelationship":
+                    if not node_label or not end_node_label or not relationship_type:
+                        raise Exception("Error: start node label, end node label, and relationship_type are required.")
+                    
+                    cypher_query = f"""
+                        MERGE (a:{node_label} {{ {', '.join([f'{key}: $properties.{key}' for key in properties])} }})
+                        MERGE (b:{end_node_label} {{ {', '.join([f'{key}: $end_properties.{key}' for key in end_node_properties])} }})
+                        MERGE (a)-[r:{relationship_type}]->(b)
+                        RETURN a, b, type(r) AS relationship
+                    """
+                    print("Generated Query:", cypher_query)
                 elif operation == "update_relationship":
                     if not node_label or not end_node_label or not relationship_type:
                         raise Exception("Error: Start node label, end node label, and relationship_type are required.")
@@ -98,6 +131,25 @@ class Neo4jCRUDTool(Tool):
                         cypher_query += f" CREATE (a)-[new_r:{update_parameter}]->(b) DELETE r RETURN a, new_r, b"
                     else:
                         cypher_query += " RETURN a, r, b"
+                elif operation == "delete_relationship_between_nodes":
+                    if not node_label or not end_node_label or not relationship_type:
+                        raise Exception("Error: Start node label, end node label, and relationship_type are required.")
+                    if not properties or not end_node_properties:
+                        raise Exception("Error: Both start and end node properties are required.")
+                    
+                    start_node_match = " AND ".join(
+                        [f"a.{key} = '{value}'" for key, value in properties.items()]
+                    )
+                    end_node_match = " AND ".join(
+                        [f"b.{key} = '{value}'" for key, value in end_node_properties.items()]
+                    )
+                    
+                    cypher_query = f"""
+                        MATCH (a:{node_label})-[r:{relationship_type}]->(b:{end_node_label})
+                        WHERE {start_node_match} AND {end_node_match}
+                        DELETE r
+                        RETURN COUNT(r) as deleted_count
+                    """
                 
                 if not cypher_query.strip():
                     raise Exception("Error: Generated Cypher query is empty.")
@@ -122,4 +174,3 @@ class Neo4jCRUDTool(Tool):
             raise Exception(f"Error: {str(e)}")
         finally:
             driver.close()
-

@@ -42,6 +42,12 @@ parameters:
       - value: update_relationship
         label:
           en_US: Update Relationship
+      - value: delete_relationship
+        label:
+          en_US: Delete Relationship
+      - value: delete_relationship_between_nodes
+        label:
+          en_US: Delete Relationship Between Nodes
     human_description:
       en_US: Select the type of operation to perform (Create, Read, Update, Delete, or Relate).
     llm_description: Choose whether to create, read, update, delete, or relate nodes.
