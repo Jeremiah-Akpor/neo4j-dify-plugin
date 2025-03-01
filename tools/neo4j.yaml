@@ -39,6 +39,9 @@ parameters:
       - value: createNodesWithRelationship
         label:
           en_US: Create Nodes with Relationship
+      - value: update_relationship
+        label:
+          en_US: Update Relationship
     human_description:
       en_US: Select the type of operation to perform (Create, Read, Update, Delete, or Relate).
     llm_description: Choose whether to create, read, update, delete, or relate nodes.
@@ -90,14 +93,14 @@ parameters:
       en_US: The type of relationship to create.
     llm_description: The type of relationship to create.
     form: llm
-  - name: update_properties
+  - name: update_parameter
     type: string 
     required: false
     label:
-      en_US: Update Properties (JSON)
+      en_US: Update Properties (JSON) or Relationship (str)
     human_description:
-      en_US: Key-value pairs for  updating node properties. 
-    llm_description: JSON object with key-value pairs used to update properties.
+      en_US: Key-value pairs for updating node properties or a string for updating relationship. 
+    llm_description: JSON object with key-value pairs used to update properties or a string for updating relationship. . 
     default: "{}"
     form: llm
   - name: query

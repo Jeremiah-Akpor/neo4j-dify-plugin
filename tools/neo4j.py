@@ -20,46 +20,41 @@ class Neo4jCRUDTool(Tool):
         operation = tool_parameters["operation"]
         node_label = tool_parameters.get("node_label", "")  # start node label
         properties_str = tool_parameters.get("properties", "{}")  # Get JSON string
-        update_properties_str = tool_parameters.get(
-            "update_properties", "{}"
-        )  # Get JSON string for updates
         query = tool_parameters.get("query", "")
         end_node_label = tool_parameters.get("end_node_label", "")
         end_node_properties_str = tool_parameters.get("end_node_properties", "{}")
         relationship_type = tool_parameters.get("relationship_type", "")
+        update_parameter_str = tool_parameters.get("update_parameter", "{}")
+        print(update_parameter_str)
 
-        # Convert properties and update_properties from string to dictionary safely
+        # Convert properties and update_parameter from string to dictionary safely
         try:
             properties = (
                 json_repair.loads(properties_str) if properties_str.strip() else {}
             )
-        except json.JSONDecodeError:
-            raise Exception("Error: Invalid properties JSON string.")
-
-        try:
-            update_properties = (
-                json_repair.loads(update_properties_str)
-                if update_properties_str.strip()
+            update_parameter = (
+                json_repair.loads(update_parameter_str)
+                if update_parameter_str.strip() and operation == "update"
                 else {}
             )
-        except json.JSONDecodeError:
-            raise Exception("Error: Invalid update_properties JSON string.")
-
-        try:
+            if operation == "update_relationship":
+                update_parameter =update_parameter_str
             end_node_properties = (
                 json_repair.loads(end_node_properties_str)
                 if end_node_properties_str.strip()
                 else {}
             )
         except json.JSONDecodeError:
-            raise Exception("Error: Invalid end_node_properties JSON string.")
+            raise Exception("Error: Invalid JSON format in properties or update_parameter.")
+        
+        print(update_parameter)
         
         driver = GraphDatabase.driver(uri, auth=(user, password))
 
         try:
             with driver.session() as session:
                 if query:
-                    result = session.run(query, {**properties, **update_properties})
+                    result = session.run(query, {"properties": properties, "update_parameter": update_parameter})
                     records = [record.data() for record in result]
                     yield self.create_json_message(records)
                     return
@@ -71,63 +66,45 @@ class Neo4jCRUDTool(Tool):
                     cypher_query = f"MATCH (n:{node_label}) RETURN n"
                 elif operation == "update":
                     if not properties:
-                        raise Exception(
-                            "Error: Matching properties required for updates."
-                        )
-                    if not update_properties:
-                        raise Exception(
-                            "Error: `update_properties` is required for updates."
-                        )
+                        raise Exception("Error: Matching properties required for updates.")
+                    if not update_parameter and operation == 'update':
+                        raise Exception("Error: `update_parameter` is required for updates.")
                     match_conditions = " AND ".join(
                         [f"n.{key} = $properties.{key}" for key in properties]
                     )
                     update_str = ", ".join(
-                        [
-                            f"n.{key} = $update_properties.{key}"
-                            for key in update_properties
-                        ]
+                        [f"n.{key} = $update_parameter.{key}" for key in update_parameter]
                     )
                     cypher_query = f"MATCH (n:{node_label}) WHERE {match_conditions} SET {update_str} RETURN n"
-                elif operation == "delete":
-                    if properties:
-                        match_conditions = " AND ".join(
-                            [f"n.{key} = $properties.{key}" for key in properties]
-                        )
-                        cypher_query = f"MATCH (n:{node_label}) WHERE {match_conditions} DETACH DELETE n RETURN 'Node and relationships deleted'"
-                    elif node_label:
-                        cypher_query = f"MATCH (n:{node_label}) DETACH DELETE n RETURN 'Nodes and relationships deleted'"
-                elif operation == "delete_all":
-                    cypher_query = "MATCH (n) DETACH DELETE n RETURN 'All nodes and relationships deleted'"
-                elif operation == "create_relationship":
+                elif operation == "update_relationship":
                     if not node_label or not end_node_label or not relationship_type:
-                        raise Exception("Error: start node label, end node label, and relationship_type are required.")
+                        raise Exception("Error: Start node label, end node label, and relationship_type are required.")
                     if not properties or not end_node_properties:
                         raise Exception("Error: Both start and end node properties are required.")
                     
-                    cypher_query = f"""
-                        MATCH (a:{node_label} {{name: '{properties.get('name')}'}}),
-                              (b:{end_node_label} {{name: '{end_node_properties.get('name')}'}})
-                        MERGE (a)-[r:{relationship_type}]->(b)
-                        RETURN type(r) AS relationship
-                    """
-                    print("Generated Query:", cypher_query)
-                elif operation == "createNodesWithRelationship":
-                    if not node_label or not end_node_label or not relationship_type:
-                        raise Exception("Error: start node label, end node label, and relationship_type are required.")
+                    start_node_match = " AND ".join(
+                        [f"a.{key} = '{value}'" for key, value in properties.items()]
+                    )
+                    end_node_match = " AND ".join(
+                        [f"b.{key} = '{value}'" for key, value in end_node_properties.items()]
+                    )
                     
                     cypher_query = f"""
-                        MERGE (a:{node_label} {{ {', '.join([f'{key}: $start_properties.{key}' for key in properties])} }})
-                        MERGE (b:{end_node_label} {{ {', '.join([f'{key}: $end_properties.{key}' for key in end_node_properties])} }})
-                        MERGE (a)-[r:{relationship_type}]->(b)
-                        RETURN a, b, type(r) AS relationship
+                        MATCH (a:{node_label})-[r:{relationship_type}]->(b:{end_node_label})
+                        WHERE {start_node_match} AND {end_node_match}
                     """
-                    print("Generated Query:", cypher_query)
+                    
+                    if isinstance(update_parameter, str) and update_parameter.strip():
+                        cypher_query += f" CREATE (a)-[new_r:{update_parameter}]->(b) DELETE r RETURN a, new_r, b"
+                    else:
+                        cypher_query += " RETURN a, r, b"
                 
                 if not cypher_query.strip():
                     raise Exception("Error: Generated Cypher query is empty.")
                 
                 result = session.run(cypher_query, {
-                    "start_properties": properties,
+                    "properties": properties,
+                    "update_parameter": update_parameter,
                     "end_properties": end_node_properties,
                     "relationship_type": relationship_type,
                 })
@@ -145,3 +122,4 @@ class Neo4jCRUDTool(Tool):
             raise Exception(f"Error: {str(e)}")
         finally:
             driver.close()
+
