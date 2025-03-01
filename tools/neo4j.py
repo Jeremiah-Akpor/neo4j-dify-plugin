@@ -4,9 +4,51 @@ from neo4j import GraphDatabase
 from dify_plugin import Tool
 from dify_plugin.entities.tool import ToolInvokeMessage
 import json_repair
-
+import matplotlib.pyplot as plt
+import networkx as nx
+import io
+import base64
 
 class Neo4jCRUDTool(Tool):
+    def _visualize_graph(self, session) -> Generator[ToolInvokeMessage, None, None]:
+        """
+        Fetches Neo4j graph data and generates an image visualization, returning a Base64 encoded string.
+        """
+        # uri = self.runtime.credentials["neo4j_uri"]
+        # user = self.runtime.credentials["neo4j_user"]
+        # password = self.runtime.credentials["neo4j_password"]
+        try:
+            query = "MATCH (a)-[r]->(b) RETURN a, r, b LIMIT 50"
+            result = session.run(query)
+
+            # Create NetworkX graph
+            G = nx.DiGraph()
+            for record in result:
+                node_a = record["a"].get("name", str(record["a"].id))
+                node_b = record["b"].get("name", str(record["b"].id))
+                relationship = record["r"].type
+                G.add_edge(node_a, node_b, label=relationship)
+
+            # Plot the graph
+            plt.figure(figsize=(12, 8))
+            pos = nx.spring_layout(G)
+            nx.draw(G, pos, with_labels=True, node_color="skyblue", edge_color="gray", node_size=3000, font_size=10)
+            nx.draw_networkx_edge_labels(G, pos, edge_labels={(u, v): d['label'] for u, v, d in G.edges(data=True) if 'label' in d})
+            plt.title("Neo4j Graph Visualization")
+
+            # Save image to buffer
+            buffer = io.BytesIO()
+            plt.savefig(buffer, format='png', dpi=50)
+            buffer.seek(0)
+            base64_str = base64.b64encode(buffer.read()).decode('utf-8')
+            buffer.close()
+            plt.close()
+
+            yield self.create_json_message({"image": f"data:image/png;base64,{base64_str}"})
+        except Exception as e:
+            raise Exception(f"Error: Failed to generate graph visualization: {str(e)}")
+
+    
     def _invoke(
         self, tool_parameters: dict[str, Any]
     ) -> Generator[ToolInvokeMessage, None, None]:
@@ -59,7 +101,9 @@ class Neo4jCRUDTool(Tool):
                     return
 
                 cypher_query = ""
-                if operation == "create":
+                if operation == "visualize_graph":
+                    yield from self._visualize_graph(session)
+                elif operation == "create":
                     cypher_query = f"CREATE (n:{node_label} $properties) RETURN n"
                 elif operation == "read":
                     cypher_query = f"MATCH (n:{node_label}) RETURN n"

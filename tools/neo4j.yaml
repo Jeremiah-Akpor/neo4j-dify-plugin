@@ -18,6 +18,9 @@ parameters:
     label:
       en_US: Operation Type
     options:
+      - value: visualize_graph
+        label:
+          en_US: Visualize Graph
       - value: create
         label:
           en_US: Create Node
