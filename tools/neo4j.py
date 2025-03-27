@@ -9,44 +9,110 @@ import networkx as nx
 import io
 import base64
 
+
+
 class Neo4jCRUDTool(Tool):
-    def _visualize_graph(self, session) -> Generator[ToolInvokeMessage, None, None]:
+    def _visualize_graph(self, session, node_label: str, properties: dict) -> Generator[str, None, None]:
         """
-        Fetches Neo4j graph data and generates an image visualization, returning a Base64 encoded string.
+        Fetches nodes based on label and multiple partial property value matches.
+        Generates a graph visualization as a Base64 encoded image and returns a Blob.
+
+        :param node_label: The label of the node (e.g., "Research_Paper")
+        :param properties: Dictionary of properties to match (e.g., {"title": "Attention", "year": "2017"})
         """
-        # uri = self.runtime.credentials["neo4j_uri"]
-        # user = self.runtime.credentials["neo4j_user"]
-        # password = self.runtime.credentials["neo4j_password"]
         try:
-            query = "MATCH (a)-[r]->(b) RETURN a, r, b LIMIT 50"
-            result = session.run(query)
+            if not properties:
+                return "⚠ No properties provided for filtering."
+
+            # Construct dynamic WHERE clause based on partial matches
+            where_conditions = " AND ".join([f"n.{key} CONTAINS ${key}" for key in properties])
+
+            match_node_query = f"""
+            MATCH (n:{node_label})
+            WHERE {where_conditions}
+            RETURN n
+            LIMIT 1
+            """
+            node_result = session.run(match_node_query, **properties).single()
+
+            if not node_result:
+                return f"⚠ No nodes found with label `{node_label}` and matching `{properties}`."
+
+            target_node = node_result["n"]
+            target_node_id = target_node.id
+            target_node_name = target_node.get(next(iter(properties.keys())), f"Node {target_node_id}")
+
+            # Fetch immediate neighbors
+            cypher_query = """
+            MATCH (n)-[r]-(neighbor)
+            WHERE ID(n) = $node_id
+            RETURN n, r, neighbor
+            """
+            result = session.run(cypher_query, node_id=target_node_id)
 
             # Create NetworkX graph
             G = nx.DiGraph()
+            node_colors = {}
+
+            G.add_node(target_node_name)
+            node_colors[target_node_name] = "orange"  # Target node in orange
+
             for record in result:
-                node_a = record["a"].get("name", str(record["a"].id))
-                node_b = record["b"].get("name", str(record["b"].id))
+                neighbor_node = record["neighbor"]
                 relationship = record["r"].type
-                G.add_edge(node_a, node_b, label=relationship)
+
+                # Define fallback properties for neighbors
+                if "Author" in neighbor_node.labels:
+                    node_name = neighbor_node.get("name", f"Author {neighbor_node.id}")
+                    node_colors[node_name] = "lightgreen"  # Author nodes in green
+                elif "Research_Paper" in neighbor_node.labels or "Reference_Paper" in neighbor_node.labels:
+                    node_name = neighbor_node.get("title", f"Paper {neighbor_node.id}")
+                    node_colors[node_name] = "skyblue"  # Papers in skyblue
+                elif "Source" in neighbor_node.labels:
+                    node_name = neighbor_node.get("name", f"Source {neighbor_node.id}")
+                    node_colors[node_name] = "lightblue"
+                elif "Topic" in neighbor_node.labels:
+                    node_name = neighbor_node.get("name", f"Topic {neighbor_node.id}")
+                    node_colors[node_name] = "lightcoral"
+                elif "Concept" in neighbor_node.labels:
+                    node_name = neighbor_node.get("name", f"Concept {neighbor_node.id}")
+                    node_colors[node_name] = "lightcoral"
+                else:
+                    node_name = neighbor_node.get("display_name") or neighbor_node.get("name") or neighbor_node.get("title") or f"Node {neighbor_node.id}"
+                    node_colors[node_name] = "gray"  # Default fallback color
+
+                G.add_edge(target_node_name, node_name, label=relationship)
+
+            if G.number_of_nodes() == 1:
+                return f"⚠ No connections found for `{target_node_name}`."
 
             # Plot the graph
             plt.figure(figsize=(12, 8))
             pos = nx.spring_layout(G)
-            nx.draw(G, pos, with_labels=True, node_color="skyblue", edge_color="gray", node_size=3000, font_size=10)
-            nx.draw_networkx_edge_labels(G, pos, edge_labels={(u, v): d['label'] for u, v, d in G.edges(data=True) if 'label' in d})
-            plt.title("Neo4j Graph Visualization")
+            node_color_list = [node_colors[node] for node in G.nodes()]
+            
+            nx.draw(G, pos, with_labels=True, node_color=node_color_list, edge_color="gray", node_size=3000, font_size=10)
+            nx.draw_networkx_edge_labels(G, pos, edge_labels={(u, v): d["label"] for u, v, d in G.edges(data=True) if "label" in d})
+            plt.title(f"Neo4j Graph for: {target_node_name}")
 
             # Save image to buffer
             buffer = io.BytesIO()
-            plt.savefig(buffer, format='png', dpi=50)
+            plt.savefig(buffer, format="png", dpi=50)
             buffer.seek(0)
-            base64_str = base64.b64encode(buffer.read()).decode('utf-8')
+            image_blob = buffer.read()
+            base64_str = base64.b64encode(image_blob).decode("utf-8")
             buffer.close()
             plt.close()
 
-            yield self.create_json_message({"image": f"data:image/png;base64,{base64_str}"})
+            # Return both base64 image and blob
+            return {
+                "base64": f"data:image/png;base64,{base64_str}",
+                "blob": image_blob
+            }
+
         except Exception as e:
-            raise Exception(f"Error: Failed to generate graph visualization: {str(e)}")
+            raise Exception(f"Error visualizing graph: {str(e)}")
+
 
     
     def _invoke(
@@ -67,7 +133,7 @@ class Neo4jCRUDTool(Tool):
         end_node_properties_str = tool_parameters.get("end_node_properties", "{}")
         relationship_type = tool_parameters.get("relationship_type", "")
         update_parameter_str = tool_parameters.get("update_parameter", "{}")
-        print(f"Operation: {operation}, Node Label: {node_label}, Properties: {properties_str}, Query: {query}")
+        # print(f"Operation: {operation}, Node Label: {node_label}, Properties: {properties_str}, Query: {query}")
         # Convert properties and update_parameter from string to dictionary safely
         try:
             properties = (
@@ -88,21 +154,37 @@ class Neo4jCRUDTool(Tool):
         except json.JSONDecodeError:
             raise Exception("Error: Invalid JSON format in properties or update_parameter.")
         
-        print(f"Properties: {properties}, Update Parameter: {update_parameter}")
+        # print(f"Properties: {properties}, Update Parameter: {update_parameter}")
         
         driver = GraphDatabase.driver(uri, auth=(user, password))
 
         try:
             with driver.session() as session:
                 if query:
-                    result = session.run(query, {"properties": properties, "update_parameter": update_parameter})
+                    result = session.run(query)
                     records = [record.data() for record in result]
-                    yield self.create_json_message(records)
+                    response_data = (
+                        {"results": records} if records else {"message": "No results found"}
+                    )
+
+                    yield self.create_text_message(
+                        f" Advance Query : {query}`\nResults: {json.dumps(response_data, indent=4)}"
+                    )
+                    yield self.create_json_message(response_data)
                     return
 
                 cypher_query = ""
                 if operation == "visualize_graph":
-                    yield from self._visualize_graph(session)
+                    visual = self._visualize_graph(session, node_label, properties) 
+                    if isinstance(visual, str):
+                        yield self.create_text_message(visual)
+                        return
+                    else:
+                        yield  self.create_text_message(f"![Graph Image]({visual['base64']})")
+                        yield self.create_json_message({"base64": f"{visual['base64']}"})
+                        yield self.create_blob_message(visual["blob"], meta={"mime_type": "image/png"})
+                        
+                        return
                 elif operation == "create":
                     cypher_query = f"CREATE (n:{node_label} $properties) RETURN n"
                 elif operation == "read":
@@ -141,7 +223,7 @@ class Neo4jCRUDTool(Tool):
                         MERGE (a)-[r:{relationship_type}]->(b)
                         RETURN type(r) AS relationship
                     """
-                    print("Generated Query:", cypher_query)
+                    # print("Generated Query:", cypher_query)
                 elif operation == "createNodesWithRelationship":
                     if not node_label or not end_node_label or not relationship_type:
                         raise Exception("Error: start node label, end node label, and relationship_type are required.")
@@ -152,7 +234,7 @@ class Neo4jCRUDTool(Tool):
                         MERGE (a)-[r:{relationship_type}]->(b)
                         RETURN a, b, type(r) AS relationship
                     """
-                    print("Generated Query:", cypher_query)
+                    # print("Generated Query:", cypher_query)
                 elif operation == "update_relationship":
                     if not node_label or not end_node_label or not relationship_type:
                         raise Exception("Error: Start node label, end node label, and relationship_type are required.")
